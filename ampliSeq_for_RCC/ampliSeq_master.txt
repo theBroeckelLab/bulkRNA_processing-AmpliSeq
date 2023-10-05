@@ -1,0 +1,125 @@
+## Pipeline for AmpliSeq quantification on HPC
+## 09.18.2023
+
+
+########################
+##### PRELIM STEPS #####
+########################
+
+#### DATA TRANSFER ####
+# transfer data from NWGC to login-hpc.rcc.mcw.edu
+# via Globus connect. Work with RCC support to set
+# this up. for processing, create a new directory in
+# scratch. transfer files initially to scratch dir. once
+# processed, transfer all raw and processed data into
+# group for long-term storage
+
+
+#### EXTRACT TARBALL ####
+# extracting the archive will result in 4 files per
+# sample: R1 and R2 (paired-end reads) each with 2
+# lanes (L001_R1, L002_R1, L001_R2, and L002_R2)
+tar -xvf broeckel_run2.tar
+
+
+#### PASRE SAMPLE NAMES / CREATE JOB ARRAY TASK FILE ####
+# need to create a two-column text file with column #1 
+# being an index (1,2,3...n) and column #2 being the trimmed 
+# sample names. this is required to run the job array on the RCC
+# cluster. Lanes, replicate numbers, and extensions should
+# be trimmed (ie 1088_CER_1x_S35_L001_R1_001.fastq.gz would be 
+# trimmed to 1088_CER_1x_S35). There's not a great way to do the
+# name trimming, the below sed command will help but output must be
+# reviewed manually
+ls -1 |  sed 's/_L00._R._001.fastq.gz//' | uniq | awk '{printf("%1d\t%s\n", NR, $0)}' | awk 'BEGIN {OFS="\t"; print "ArrayTaskID","SampleName"} {print $0, ""}' > sample_names.txt
+
+
+#### COPY SCRIPTS INTO SCRATCH DIRECTORY ####
+# since data processing will be run from scratch, we'll
+# need to copy the processing scripts from group
+cp /group/ubroecke/work/MAPLE/scripts/ampliSeq_scripts/ampliSeq_for_RCC/combineLanes.sh ./
+cp /group/ubroecke/work/MAPLE/scripts/ampliSeq_scripts/ampliSeq_for_RCC/alignment_forRCC.sh ./
+cp /group/ubroecke/work/MAPLE/scripts/ampliSeq_scripts/ampliSeq_for_RCC/quantification_forRCC.sh ./
+cp /group/ubroecke/work/MAPLE/scripts/ampliSeq_scripts/ampliSeq_for_RCC/qc_generate.R ./
+cp /group/ubroecke/work/MAPLE/scripts/ampliSeq_scripts/ampliSeq_for_RCC/combine_ampliSeq.R ./
+
+
+#### COPY REFERENCES INTO SCRATCH DIRECTORY ####
+# since we're running pipeline from scratch directory, 
+# need to copy the hg ampliseq reference and annotation
+# file into the current working directory
+cp -R /group/ubroecke/work/MAPLE/references/illumina_ampliseq_ref/Genomes/Illumina/hg19/genome/Sequence/BWAIndex ./
+cp /group/ubroecke/work/MAPLE/references/illumina_ampliseq_ref/Transcriptome.rna_manifest.20190313.geneExpression.targets.gtf ./
+cp /group/ubroecke/work/MAPLE/references/illumina_ampliseq_ref/Transcriptome.rna_gene_targets2.txt ./
+
+
+
+#####################
+#### MAIN STEPS #####
+####################
+
+#### STEP 1 : CONCATENATE LANES 1 AND 2 ####
+# lanes for each sample replicate must be concatenated. for
+# example, 1088_CER_1x_S35_L001_R1_001.fastq.gz and 
+# 1088_CER_1x_S35_L002_R1_001.fastq.gz should be concatenated
+# into one large fastq.gz. the combineLanes.sh script will do this 
+./combineLanes.sh
+
+
+#### STEP 2 : ALIGNMENT ####
+# alignment is 1 of the 2 computationally intensive steps in
+# this pipeline. Hence we'll create a job script to submit
+# to the RCC job scheduler (see alignment_forRCC.sh). this
+# script uses a job array to instruct the scheduler to align 6 
+# samples at a time, each with 8 threads. the script also sorts
+# the BAM files and generates alignment stats (_alignstats.txt)
+# for each input sample. should take 1.5-2 hours
+sbatch alignment_forRCC.sh
+
+
+#### STEP 3 : EXPRESSION QUANTIFICATION
+# quantification with htseq is the other computationally intensive
+# step. We use another job script (see quantification_forRCC.sh)
+# to submit to the job scheduler. This one uses a job array to run
+# 6 quantifications at once. Quantification cannot be multi-threaded
+# thus in total this step will take 9-12 hours
+sbatch quantification_forRCC.sh
+
+
+#### STEP 4 : GENERATE QC TABLES
+# alignstats.txt files were created in the alignment step, here
+# we combine the qc stats from those files into a workable dataframe
+# and save to an xlsx file. see output qc_out.xlsx
+module load R
+Rscript /data/scripts/ampliSeq_scripts/qc_generate.R
+
+
+#### STEP 5 : COMBINE CONTS FILES INTO COUNTS MATRIX
+# our htseq quantification generated counts files per sample, however
+# we need these individual counts combined into a matrix with genes
+# as rows and samples as columns. see output combined_counts.txt
+module load R
+Rscript /data/scripts/ampliSeq_scripts/combine_ampliSeq.R
+
+
+
+
+##############################################
+#### MERGING DATA WITH PREVIOUS FLOWCELLS ####
+##############################################
+
+#### MERGING QC OUTPUT WITH PREVIOUS RUNS ####
+# -copy qc_out.xlsx to katsura (Z:\Projects\Project Management\Cytotoxicity\Data\TKI_UWGS\QC)
+# -using excel or R, combine this flowcell's QC with all previous runs see All_runs_combined.xlsx in the above folder
+# -run the qc_analysis.R script (/group/ubroecke/work/MAPLE/scripts/ampliSeq_scripts/ampliSeq_for_RCC) in RStudio to create the usual QC plots
+
+
+#### MERGING COUNTS/METADATA WITH PREVIOUS RUNS ####
+# -create a new folder on Katsura for the current run (ie Z:\Projects\Project Management\Cytotoxicity\Data\TKI_UWGS\run1_to_N)
+# -using coreFTP, copy the combined_counts.txt file to new katsura directory
+# -combine the counts matrix from the current run with the most recent counts matrix on katsura. for example, if the last flowcell was run 23 and the current one is run 24, combine the runs1-23 counts with the run24 counts. there are many ways to do this, cbind in R is what I use
+# -make a copy of the most recent metadata to the new katsura folder. for example if the last flowcell was run23 and the current one is run24, copy the metadata runs1-23 over. Using the sample names and the clinical phenotypes sheet (Z:\Projects\Project Management\Analysis\12.16.2019\Data Analysis\Data and Gene Sets\PhenotypeData), append the metadata to include information for the latest run. it's not easy to automate this, requires manual review
+
+
+
+
