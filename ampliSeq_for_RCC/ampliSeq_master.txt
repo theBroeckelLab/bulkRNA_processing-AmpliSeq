@@ -13,6 +13,7 @@
 # scratch. transfer files initially to scratch dir. once
 # processed, transfer all raw and processed data into
 # group for long-term storage
+module load globusconnect
 
 
 #### EXTRACT TARBALL ####
