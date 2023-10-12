@@ -92,7 +92,7 @@ sbatch quantification_forRCC.sh
 # we combine the qc stats from those files into a workable dataframe
 # and save to an xlsx file. see output qc_out.xlsx
 module load R
-Rscript /data/scripts/ampliSeq_scripts/qc_generate.R
+Rscript ./qc_generate.R
 
 
 #### STEP 5 : COMBINE CONTS FILES INTO COUNTS MATRIX
@@ -100,7 +100,7 @@ Rscript /data/scripts/ampliSeq_scripts/qc_generate.R
 # we need these individual counts combined into a matrix with genes
 # as rows and samples as columns. see output combined_counts.txt
 module load R
-Rscript /data/scripts/ampliSeq_scripts/combine_ampliSeq.R
+Rscript ./combine_ampliSeq.R
 
 
 
