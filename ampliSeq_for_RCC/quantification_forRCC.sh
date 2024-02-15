@@ -32,7 +32,7 @@ module load htseq
 module load samtools
 
 ## define genome annotation file
-ANNOTATION="annotation.gtf"
+ANNOTATION="Transcriptome.rna_manifest.20190313.geneExpression.targets.gtf"
 
 # Specify input directory
 #
