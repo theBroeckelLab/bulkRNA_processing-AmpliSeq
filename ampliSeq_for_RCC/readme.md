@@ -1,5 +1,4 @@
-Author: Ryan Gallagher
-Updated: 04-04-2025
+Author: Ryan Gallagher (04-04-2025) 
 
 ## NWGC AmpliSeq Quantification Documentation
 
